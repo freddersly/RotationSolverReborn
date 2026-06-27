@@ -5,6 +5,7 @@ namespace RotationSolver.ExtraRotations.Tank;
 [Rotation("FredderslyGNB", CombatType.PvE, GameVersion = "7.5")]
 [SourceCode(Path = "main/ExtraRotations/Tank/FredderslyGNB.cs")]
 [ExtraRotation]
+
 public sealed class FredderslyGNB : GunbreakerRotation
 {
 	private const float FillerGnashingHoldWindow = 7f;
@@ -30,19 +31,17 @@ public sealed class FredderslyGNB : GunbreakerRotation
 			return false;
 		}
 
-		if (GnashingFangPvE.Cooldown.CurrentCharges >= 2)
-		{
-			return true;
-		}
-
 		if (!Use250GnashingOptimization)
 		{
 			return true;
 		}
 
 		// Start the filler Gnashing Fang at the guide's hold window so an
-		// extra Gnashing GCD or continuation can land inside No Mercy.
-		return NoMercyPvE.Cooldown.WillHaveOneCharge(FillerGnashingHoldWindow);
+		// extra Gnashing GCD or continuation can land inside No Mercy. Gate on
+		// No Mercy already cooling down so the opener doesn't rush Gnashing Fang
+		// before the first No Mercy (its charge is up from the pull).
+		return NoMercyPvE.Cooldown.IsCoolingDown
+			&& NoMercyPvE.Cooldown.WillHaveOneCharge(FillerGnashingHoldWindow);
 	}
 
 	private bool ShouldStallForGnashingFang()
@@ -68,16 +67,16 @@ public sealed class FredderslyGNB : GunbreakerRotation
 
 	private bool ShouldUseLevel100NoMercy(IAction nextGCD)
 	{
+		// NM after Brutal Shell; delayed opener fires NM before Bloodfest so don't gate on it.
+		// Window covers Lightning Shot opening the GCD clock when there's no countdown.
+		if (CombatElapsedLessGCD(4) && IsLastComboAction(ActionID.BrutalShellPvE))
+		{
+			return OpenerVariant == OpenerStrategy.DelayedBloodfest || HasBloodfest;
+		}
+
 		if (!HasBloodfest)
 		{
 			return false;
-		}
-
-		// The 2.50 opener delays No Mercy until after Brutal Shell so the
-		// window begins on Gnashing Fang instead of the first combo GCD.
-		if (CombatElapsedLessGCD(3) && IsLastComboAction(ActionID.BrutalShellPvE))
-		{
-			return true;
 		}
 
 		// Top logs often ramp with Gnashing Fang first, then weave No Mercy
@@ -96,6 +95,18 @@ public sealed class FredderslyGNB : GunbreakerRotation
 	#region Config Options
 	[RotationConfig(CombatType.PvE, Name = "Use 2.50 Gnashing Fang Optimization")]
 	public bool Use250GnashingOptimization { get; set; } = true;
+
+	[RotationConfig(CombatType.PvE, Name = "Opener variant (Bloodfest timing)")]
+	public OpenerStrategy OpenerVariant { get; set; } = OpenerStrategy.EarlyBloodfest;
+
+	public enum OpenerStrategy : byte
+	{
+		[Description("Early Bloodfest")]
+		EarlyBloodfest,
+
+		[Description("Delayed Bloodfest")]
+		DelayedBloodfest,
+	}
 
 	[RotationConfig(CombatType.PvE, Name = "How to use Aurora")]
 	public AuroraUsageStrategy AuroraUsage { get; set; } = AuroraUsageStrategy.TankbusterTarget;
@@ -392,11 +403,17 @@ public sealed class FredderslyGNB : GunbreakerRotation
 
 		if (BloodfestPvE.CanUse(out act))
 		{
-			if (HasNoMercy
-				|| !NoMercyPvE.EnoughLevel
-				|| NoMercyPvE.Cooldown.WillHaveOneCharge(FillerGnashingHoldWindow)
-				|| InGnashingFang
-				|| HasReadyToGouge)
+			// delayed opener: hold Bloodfest until NM is up
+			bool holdForDelayedOpener = OpenerVariant == OpenerStrategy.DelayedBloodfest
+				&& CombatElapsedLessGCD(3)
+				&& !HasNoMercy;
+
+			if (!holdForDelayedOpener
+				&& (HasNoMercy
+					|| !NoMercyPvE.EnoughLevel
+					|| NoMercyPvE.Cooldown.WillHaveOneCharge(FillerGnashingHoldWindow)
+					|| InGnashingFang
+					|| HasReadyToGouge))
 			{
 				return true;
 			}
