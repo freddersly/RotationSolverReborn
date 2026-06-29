@@ -1,4 +1,4 @@
-// FredderslyPLD Test Version: 2026-06-29.1634-FoFCombatGate-ShieldLobGate
+// FredderslyPLD Test Version: 2026-06-29.1710-FoFCombatGate-ShieldLobGate
 
 namespace RotationSolver.ExtraRotations.Tank;
 
@@ -148,6 +148,11 @@ public sealed class FredderslyPLD : PaladinRotation
 			return act;
 		}
 
+		if (UseJohannShieldLobPull && remainTime <= 3f && remainTime > 1f && UseBurstMedicine(out act))
+		{
+			return act;
+		}
+
 		if (UseJohannShieldLobPull && remainTime <= 0.6f && ShieldLobPvE.CanUse(out act))
 		{
 			return act;
@@ -246,10 +251,10 @@ public sealed class FredderslyPLD : PaladinRotation
 
 	protected override bool EmergencyAbility(IAction nextGCD, out IAction? act)
 	{
-		return TryUseJohannPotion(out act)
-			|| TryUseFightOrFlight(nextGCD, out act)
+		return TryUseFightOrFlight(nextGCD, out act)
 			|| TryUseImperator(out act)
 			|| TryUseBladeOfHonor(out act)
+			|| TryUseJohannPotion(out act)
 			|| TryUseEmergencyMitigation(out act)
 			|| base.EmergencyAbility(nextGCD, out act);
 	}
@@ -529,7 +534,7 @@ public sealed class FredderslyPLD : PaladinRotation
 	{
 		act = null;
 		return InCombat
-			&& (HasFightOrFlight || FightOrFlightPvE.Cooldown.WillHaveOneChargeGCD(1))
+			&& HasFightOrFlight
 			&& UseBurstMedicine(out act);
 	}
 
