@@ -10,7 +10,8 @@ public sealed class FredderslyPLD : PaladinRotation
 	private static bool InConfiteorCombo => BladeOfFaithReady || BladeOfTruthReady || BladeOfValorReady;
 	private static bool HasJohannBurstGCD => HasConfiteorReady || InConfiteorCombo;
 
-	private bool CanUseFightOrFlight => HasHostilesInRange || !MeleeFoF;
+	private bool CanUseJohannPullFightOrFlight => UseJohannShieldLobPull && CombatElapsedLessGCD(2);
+	private bool CanUseFightOrFlight => HasHostilesInRange || !MeleeFoF || CanUseJohannPullFightOrFlight;
 
 	private bool FightOrFlightSoon => !HasFightOrFlight
 		&& CanUseFightOrFlight
@@ -23,6 +24,10 @@ public sealed class FredderslyPLD : PaladinRotation
 	private bool ShouldWaitForImperator => HasFightOrFlight
 		&& !HasJohannBurstGCD
 		&& ImperatorReadyForJohannBurst;
+
+	private bool ShouldHoldDamageOGCDsForImperator => HasFightOrFlight
+		&& !InConfiteorCombo
+		&& (HasConfiteorReady || ImperatorReadyForJohannBurst);
 
 	private bool ShouldHoldAtonementForFightOrFlight => ShouldHoldForFightOrFlight(StatusID.AtonementReady)
 		&& !RoyalAuthorityPvE.CanUse(out _, skipComboCheck: false)
@@ -520,6 +525,11 @@ public sealed class FredderslyPLD : PaladinRotation
 	private bool TryUseDamageOGCDs(out IAction? act)
 	{
 		act = null;
+
+		if (ShouldHoldDamageOGCDsForImperator)
+		{
+			return false;
+		}
 
 		if (ExpiacionPvE.CanUse(out act, skipAoeCheck: true, skipTTKCheck: true))
 		{
