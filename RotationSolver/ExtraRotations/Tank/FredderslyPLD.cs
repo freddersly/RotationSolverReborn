@@ -1,53 +1,95 @@
-using System.ComponentModel;
-
 namespace RotationSolver.ExtraRotations.Tank;
 
-[Rotation("FredderslyPLD", CombatType.PvE, GameVersion = "7.5", Description = "High-end Paladin Fight or Flight planner based on the Johann, Hidey, and Lilith Lindwurm logs.")]
+[Rotation("FredderslyPLD", CombatType.PvE, GameVersion = "7.5", Description = "Johann Collin-inspired Paladin priority model for Lindwurm-style Fight or Flight windows.")]
 [SourceCode(Path = "main/ExtraRotations/Tank/FredderslyPLD.cs")]
 [ExtraRotation]
 public sealed class FredderslyPLD : PaladinRotation
 {
-	#region Rotation State
+	#region Properties
 
-	private static bool MidBasicCombo => LiveComboTime > 0f
-		&& IsLastComboAction(ActionID.FastBladePvE, ActionID.RiotBladePvE);
+	private static bool InConfiteorCombo => BladeOfFaithReady || BladeOfTruthReady || BladeOfValorReady;
+	private static bool HasJohannBurstGCD => HasConfiteorReady || InConfiteorCombo;
 
-	private bool IsJohannStyle => ParserStyle == TopParserFoFStyle.JohannRecommended;
-	private bool IsHideyStyle => ParserStyle == TopParserFoFStyle.HideyHiagal;
-	private bool IsLilithStyle => ParserStyle == TopParserFoFStyle.LilithOmgBestie;
+	private bool CanUseFightOrFlight => HasHostilesInRange || !MeleeFoF;
 
-	private bool HasCarryoverAtonement => SupplicationReady || SepulchreReady;
+	private bool FightOrFlightSoon => !HasFightOrFlight
+		&& CanUseFightOrFlight
+		&& FightOrFlightPvE.Cooldown.WillHaveOneChargeGCD(2);
 
-	private bool ShouldHoldBladeOfHonorForLilith => IsLilithStyle
-		&& HasFightOrFlight
-		&& GoringBladePvE.CanUse(out _)
-		&& BladeOfHonorPvE.CanUse(out _)
-		&& !BladeOfValorPvE.CanUse(out _, skipComboCheck: true);
+	private bool ImperatorReadyForJohannBurst => ImperatorPvE.CanUse(out _, skipAoeCheck: true, usedUp: true, skipTTKCheck: true);
+
+	private bool ShouldWaitForImperator => HasFightOrFlight
+		&& !HasJohannBurstGCD
+		&& ImperatorReadyForJohannBurst;
+
+	private bool ShouldHoldAtonementForFightOrFlight => ShouldHoldForFightOrFlight(StatusID.AtonementReady)
+		&& !RoyalAuthorityPvE.CanUse(out _, skipComboCheck: false)
+		&& !RageOfHalonePvE.CanUse(out _, skipComboCheck: false);
+
+	private bool ShouldHoldSupplicationForFightOrFlight => ShouldHoldForFightOrFlight(StatusID.SupplicationReady);
+	private bool ShouldHoldSepulchreForFightOrFlight => ShouldHoldForFightOrFlight(StatusID.SepulchreReady);
+	private bool ShouldHoldDivineMightForFightOrFlight => ShouldHoldForFightOrFlight(StatusID.DivineMight);
+	private bool ShouldSpendInterveneForDamage => !HasFightOrFlight
+		|| IntervenePvE.Cooldown.CurrentCharges > IntervenePvE.Cooldown.MaxCharges - InterveneChargesToSpendInFightOrFlight;
 
 	#endregion
 
-	#region Configuration
+	#region Config Options
 
-	private enum TopParserFoFStyle : byte
-	{
-		[Description("Johann Collin (Recommended) — Finish the Confiteor blades, then Goring Blade")]
-		JohannRecommended,
+	[RotationConfig(CombatType.PvE, Name = "Use Shield Lob to pull like Johann")]
+	private bool UseJohannShieldLobPull { get; set; } = true;
 
-		[Description("Hidey Hiagal — Goring Blade first, then any carried Supplication/Sepulchre, then Confiteor")]
-		HideyHiagal,
+	[RotationConfig(CombatType.PvE, Name = "Only use Fight or Flight while in melee range of an enemy")]
+	public bool MeleeFoF { get; set; } = true;
 
-		[Description("Lilith Omg-bestie — Goring Blade between Blade of Valor and Blade of Honor")]
-		LilithOmgBestie,
-	}
+	[Range(0, 2, ConfigUnitType.None, 1)]
+	[RotationConfig(CombatType.PvE, Name = "Intervene charges to spend during Fight or Flight")]
+	private int InterveneChargesToSpendInFightOrFlight { get; set; } = 1;
 
-	[RotationConfig(CombatType.PvE, Name = "Top parser Fight or Flight style")]
-	private TopParserFoFStyle ParserStyle { get; set; } = TopParserFoFStyle.JohannRecommended;
+	[RotationConfig(CombatType.PvE, Name = "Use Divine Veil during countdown")]
+	public bool DivineVeilCountdown { get; set; } = false;
 
-	[RotationConfig(CombatType.PvE, Name = "Use 2 Intervene charges during Fight or Flight")]
-	private bool DumpInterveneInFoF { get; set; } = true;
+	[RotationConfig(CombatType.PvE, Name = "Use Holy Spirit when out of melee range")]
+	private bool UseHolyWhenAway { get; set; } = false;
 
-	[RotationConfig(CombatType.PvE, Name = "Use Holy Spirit for ranged downtime")]
-	private bool UseHolyWhenAway { get; set; } = true;
+	[Range(0, 100, ConfigUnitType.Pixels)]
+	[RotationConfig(CombatType.PvE, Name = "Use Sheltron at minimum X Oath to prevent over cap (Set to 0 to disable)")]
+	private int WhenToSheltron { get; set; } = 100;
+
+	[Range(0, 1, ConfigUnitType.Percent)]
+	[RotationConfig(CombatType.PvE, Name = "Health threshold for Intervention (Set to 0 to disable)")]
+	private float InterventionRatio { get; set; } = 0.6f;
+
+	[RotationConfig(CombatType.PvE, Name = "Use Intervention on CoTank during tankbusters")]
+	private bool InterventionTank { get; set; } = false;
+
+	[Range(0, 1, ConfigUnitType.Percent)]
+	[RotationConfig(CombatType.PvE, Name = "Health threshold for using Intervention to attempt to save someone")]
+	private float InterventionClutch { get; set; } = 0.6f;
+
+	[Range(0, 1, ConfigUnitType.Percent)]
+	[RotationConfig(CombatType.PvE, Name = "Health threshold for Cover (Set to 0 to disable)")]
+	private float CoverRatio { get; set; } = 0.3f;
+
+	[RotationConfig(CombatType.PvE, Name = "Use Hallowed Ground with Cover")]
+	private bool HallowedWithCover { get; set; } = true;
+
+	[RotationConfig(CombatType.PvE, Name = "Use GCDs to heal. (Ignored if there are no healers alive in party)")]
+	public bool GCDHeal { get; set; } = false;
+
+	[RotationConfig(CombatType.PvE, Name = "Use Clemency with Requiescat")]
+	private bool RequiescatHealBot { get; set; } = true;
+
+	[Range(0, 1, ConfigUnitType.Percent)]
+	[RotationConfig(CombatType.PvE, Name = "Minimum HP threshold party member needs to be to use Clemency with Requiescat")]
+	public float ClemencyRequi { get; set; } = 0.2f;
+
+	[RotationConfig(CombatType.PvE, Name = "Use Clemency without Requiescat")]
+	private bool HealBot { get; set; } = true;
+
+	[Range(0, 1, ConfigUnitType.Percent)]
+	[RotationConfig(CombatType.PvE, Name = "Minimum HP threshold party member needs to be to use Clemency without Requiescat")]
+	public float ClemencyNoRequi { get; set; } = 0.4f;
 
 	#endregion
 
@@ -55,14 +97,16 @@ public sealed class FredderslyPLD : PaladinRotation
 
 	public override void DisplayRotationStatus()
 	{
-		ImGui.Text($"FoF Style: {ParserStyle}");
-		ImGui.Text($"In Fight or Flight: {HasFightOrFlight}");
-		ImGui.Text($"Goring Ready: {GoringBladePvE.CanUse(out _)}");
-		ImGui.Text($"Confiteor Ready: {HasConfiteorReady}");
-		ImGui.Text($"Atonement Ready: {HasAtonementReady}");
-		ImGui.Text($"Supplication Ready: {SupplicationReady}");
-		ImGui.Text($"Sepulchre Ready: {SepulchreReady}");
-		ImGui.Text($"Mid Basic Combo: {MidBasicCombo}");
+		ImGui.Text($"Johann Burst GCD: {HasJohannBurstGCD}");
+		ImGui.Text($"Fight or Flight Soon: {FightOrFlightSoon}");
+		ImGui.Text($"Waiting for Imperator: {ShouldWaitForImperator}");
+		ImGui.Text($"Hold Atonement: {ShouldHoldAtonementForFightOrFlight}");
+		ImGui.Text($"Hold Supplication: {ShouldHoldSupplicationForFightOrFlight}");
+		ImGui.Text($"Hold Sepulchre: {ShouldHoldSepulchreForFightOrFlight}");
+		ImGui.Text($"Hold Divine Might: {ShouldHoldDivineMightForFightOrFlight}");
+		ImGui.Text($"Intervene Burst Spend: {InterveneChargesToSpendInFightOrFlight}");
+		ImGui.Text($"Intervene Charges: {IntervenePvE.Cooldown.CurrentCharges}");
+		ImGui.Text($"Use Oath: {UseOath(out _)}");
 	}
 
 	#endregion
@@ -71,12 +115,12 @@ public sealed class FredderslyPLD : PaladinRotation
 
 	protected override IAction? CountDownAction(float remainTime)
 	{
-		if (remainTime <= 2.0f && HolySpiritPvE.CanUse(out var act))
+		if (DivineVeilCountdown && remainTime < 15 && DivineVeilPvE.CanUse(out var act))
 		{
 			return act;
 		}
 
-		if (remainTime <= 1.2f && UseBurstMedicine(out act))
+		if (UseJohannShieldLobPull && remainTime <= 0.6f && ShieldLobPvE.CanUse(out act))
 		{
 			return act;
 		}
@@ -86,94 +130,23 @@ public sealed class FredderslyPLD : PaladinRotation
 
 	#endregion
 
-	#region Continuation and Burst oGCD Logic
+	#region oGCD Logic
 
-	private bool TryUseBladeOfHonor(out IAction? act)
+	[RotationDesc(ActionID.IntervenePvE)]
+	protected override bool MoveForwardAbility(IAction nextGCD, out IAction? act)
 	{
-		act = null;
-
-		if (ShouldHoldBladeOfHonorForLilith)
-		{
-			return false;
-		}
-
-		return BladeOfHonorPvE.CanUse(out act);
+		return IntervenePvE.CanUse(out act) || base.MoveForwardAbility(nextGCD, out act);
 	}
 
-	private bool TryUseFightOrFlight(out IAction? act)
-	{
-		act = null;
-		if (!FightOrFlightPvE.CanUse(out act))
-		{
-			return false;
-		}
-
-		if (CombatElapsedLessGCD(4))
-		{
-			return IsJohannStyle || IsLastGCD(ActionID.RoyalAuthorityPvE);
-		}
-
-		return true;
-	}
-
-	private bool TryUseImperator(out IAction? act)
-	{
-		act = null;
-		return HasFightOrFlight
-			&& ImperatorPvE.CanUse(out act, skipAoeCheck: true, usedUp: true, skipTTKCheck: true);
-	}
-
-	private bool TryUseBurstPotion(out IAction? act)
-	{
-		act = null;
-		return HasFightOrFlight && InCombat && UseBurstMedicine(out act);
-	}
-
-	private bool TryUseDamageOGCDs(out IAction? act)
-	{
-		act = null;
-
-		if (ExpiacionPvE.CanUse(out act, skipAoeCheck: true))
-		{
-			return true;
-		}
-
-		if (CircleOfScornPvE.CanUse(out act, skipAoeCheck: true))
-		{
-			return true;
-		}
-
-		if (HasFightOrFlight && IntervenePvE.CanUse(out act, usedUp: DumpInterveneInFoF))
-		{
-			return true;
-		}
-
-		return false;
-	}
-
-	protected override bool EmergencyAbility(IAction nextGCD, out IAction? act)
-	{
-		return TryUseBladeOfHonor(out act)
-			|| base.EmergencyAbility(nextGCD, out act);
-	}
-
-	protected override bool AttackAbility(IAction nextGCD, out IAction? act)
-	{
-		return TryUseFightOrFlight(out act)
-			|| TryUseImperator(out act)
-			|| TryUseBurstPotion(out act)
-			|| TryUseDamageOGCDs(out act)
-			|| base.AttackAbility(nextGCD, out act);
-	}
-
-	#endregion
-
-	#region Defense and Movement Logic
-
-	[RotationDesc(ActionID.DivineVeilPvE, ActionID.ReprisalPvE)]
+	[RotationDesc(ActionID.DivineVeilPvE, ActionID.PassageOfArmsPvE, ActionID.ReprisalPvE)]
 	protected override bool DefenseAreaAbility(IAction nextGCD, out IAction? act)
 	{
 		if (DivineVeilPvE.CanUse(out act))
+		{
+			return true;
+		}
+
+		if (PassageOfArmsPvE.CanUse(out act))
 		{
 			return true;
 		}
@@ -186,101 +159,152 @@ public sealed class FredderslyPLD : PaladinRotation
 		return base.DefenseAreaAbility(nextGCD, out act);
 	}
 
-	[RotationDesc(ActionID.HolySheltronPvE, ActionID.InterventionPvE, ActionID.GuardianPvE, ActionID.RampartPvE)]
+	[RotationDesc(ActionID.SentinelPvE, ActionID.RampartPvE, ActionID.BulwarkPvE, ActionID.SheltronPvE, ActionID.HolySheltronPvE, ActionID.ReprisalPvE)]
 	protected override bool DefenseSingleAbility(IAction nextGCD, out IAction? act)
 	{
-		if (HolySheltronPvE.CanUse(out act))
+		if (InterventionTank && InterventionPvE.CanUse(out act))
 		{
 			return true;
 		}
 
-		if (InterventionPvE.CanUse(out act, targetOverride: TargetType.Tankbuster))
+		if (StatusHelper.PlayerHasStatus(true, StatusID.HallowedGround))
+		{
+			return base.DefenseSingleAbility(nextGCD, out act);
+		}
+
+		if (BulwarkPvE.CanUse(out act, skipAoeCheck: true))
+		{
+			return true;
+		}
+
+		if (UseOath(out act))
 		{
 			return true;
 		}
 
 		if ((!RampartPvE.Cooldown.IsCoolingDown || RampartPvE.Cooldown.ElapsedAfter(60))
-			&& GuardianPvE.CanUse(out act))
+			&& GuardianPvE.CanUse(out act) && GuardianPvE.EnoughLevel)
 		{
 			return true;
 		}
 
-		if (GuardianPvE.Cooldown.IsCoolingDown && GuardianPvE.Cooldown.ElapsedAfter(30)
+		if ((!RampartPvE.Cooldown.IsCoolingDown || RampartPvE.Cooldown.ElapsedAfter(60))
+			&& SentinelPvE.CanUse(out act) && !GuardianPvE.EnoughLevel)
+		{
+			return true;
+		}
+
+		if (!SentinelPvE.EnoughLevel && RampartPvE.CanUse(out act))
+		{
+			return true;
+		}
+
+		if (SentinelPvE.EnoughLevel && !GuardianPvE.EnoughLevel
+			&& SentinelPvE.Cooldown.IsCoolingDown && SentinelPvE.Cooldown.ElapsedAfter(30)
 			&& RampartPvE.CanUse(out act))
 		{
 			return true;
 		}
 
-		if (ReprisalPvE.CanUse(out act, skipAoeCheck: true))
+		if (GuardianPvE.EnoughLevel
+			&& GuardianPvE.Cooldown.IsCoolingDown && GuardianPvE.Cooldown.ElapsedAfter(30)
+			&& RampartPvE.CanUse(out act))
 		{
 			return true;
 		}
 
-		return base.DefenseSingleAbility(nextGCD, out act);
+		return ReprisalPvE.CanUse(out act, skipAoeCheck: true) || base.DefenseSingleAbility(nextGCD, out act);
 	}
 
-	[RotationDesc(ActionID.IntervenePvE)]
-	protected override bool MoveForwardAbility(IAction nextGCD, out IAction? act)
+	protected override bool EmergencyAbility(IAction nextGCD, out IAction? act)
 	{
-		return IntervenePvE.CanUse(out act) || base.MoveForwardAbility(nextGCD, out act);
+		return TryUseJohannPotion(out act)
+			|| TryUseFightOrFlight(nextGCD, out act)
+			|| TryUseImperator(out act)
+			|| TryUseBladeOfHonor(out act)
+			|| TryUseEmergencyMitigation(out act)
+			|| base.EmergencyAbility(nextGCD, out act);
+	}
+
+	[RotationDesc(ActionID.SheltronPvE, ActionID.HolySheltronPvE)]
+	protected override bool GeneralAbility(IAction nextGCD, out IAction? act)
+	{
+		if (InCombat && OathGauge >= WhenToSheltron && WhenToSheltron > 0 && UseOath(out act))
+		{
+			return true;
+		}
+
+		return base.GeneralAbility(nextGCD, out act);
+	}
+
+	[RotationDesc(ActionID.IntervenePvE, ActionID.SpiritsWithinPvE, ActionID.ExpiacionPvE, ActionID.CircleOfScornPvE)]
+	protected override bool AttackAbility(IAction nextGCD, out IAction? act)
+	{
+		return TryUseDamageOGCDs(out act)
+			|| base.AttackAbility(nextGCD, out act);
 	}
 
 	#endregion
 
-	#region GCD Phase Logic
+	#region GCD Logic
+
+	[RotationDesc(ActionID.ClemencyPvE)]
+	protected override bool HealSingleGCD(out IAction? act)
+	{
+		if (RequiescatHealBot && RequiescatStacks > 0
+			&& ClemencyPvE.CanUse(out act, skipCastingCheck: true)
+			&& ClemencyPvE.Target.Target?.GetHealthRatio() < ClemencyRequi)
+		{
+			return true;
+		}
+
+		if (HealBot && ClemencyPvE.CanUse(out act)
+			&& ClemencyPvE.Target.Target?.GetHealthRatio() < ClemencyNoRequi)
+		{
+			return true;
+		}
+
+		return base.HealSingleGCD(out act);
+	}
+
+	[RotationDesc(ActionID.ShieldBashPvE)]
+	protected override bool MyInterruptGCD(out IAction? act)
+	{
+		if (LowBlowPvE.Cooldown.IsCoolingDown && ShieldBashPvE.CanUse(out act))
+		{
+			return true;
+		}
+
+		return base.MyInterruptGCD(out act);
+	}
 
 	protected override bool GeneralGCD(out IAction? act)
 	{
-		if (HasFightOrFlight && TryUseSelectedFoFBurstGCD(out act))
-		{
-			return true;
-		}
-
-		if (TryUseActiveConfiteorChain(out act))
-		{
-			return true;
-		}
-
-		if (TryUseExpiringBurstReady(out act))
-		{
-			return true;
-		}
-
-		if (TryUseAtonementFillerGCD(out act))
-		{
-			return true;
-		}
-
-		if (TryUseFillerGCD(out act))
-		{
-			return true;
-		}
-
-		return base.GeneralGCD(out act);
+		return TryUseJohannBurstGCD(out act)
+			|| TryUseActiveConfiteorChain(out act)
+			|| TryUseExpiringGoringBlade(out act)
+			|| TryUseJohannAtonement(out act)
+			|| TryUseJohannFiller(out act)
+			|| base.GeneralGCD(out act);
 	}
 
 	#endregion
 
-	#region Fight or Flight Burst Profiles
+	#region Extra Methods
 
-	private bool TryUseSelectedFoFBurstGCD(out IAction? act)
-	{
-		return ParserStyle switch
-		{
-			TopParserFoFStyle.JohannRecommended => TryUseJohannFoFGCD(out act),
-			TopParserFoFStyle.HideyHiagal => TryUseHideyFoFGCD(out act),
-			TopParserFoFStyle.LilithOmgBestie => TryUseLilithFoFGCD(out act),
-			_ => TryUseJohannFoFGCD(out act),
-		};
-	}
+	#region GCD Skills
 
-	private bool TryUseJohannFoFGCD(out IAction? act)
+	private bool TryUseJohannBurstGCD(out IAction? act)
 	{
 		act = null;
-
-		if (!HasConfiteorReady && ImperatorPvE.CanUse(out _))
+		if (!HasFightOrFlight)
 		{
-			return TryUseFoFFillers(out act);
+			return false;
+		}
+
+		if (ShouldWaitForImperator)
+		{
+			return TryUseJohannBurstFiller(out act);
 		}
 
 		if (ConfiteorPvE.CanUse(out act, usedUp: true, skipAoeCheck: true))
@@ -293,128 +317,47 @@ public sealed class FredderslyPLD : PaladinRotation
 			return true;
 		}
 
-		return TryUseFoFFillers(out act);
+		return TryUseJohannBurstFiller(out act);
 	}
-
-	private bool TryUseHideyFoFGCD(out IAction? act)
-	{
-		act = null;
-
-		if (GoringBladePvE.CanUse(out act))
-		{
-			return true;
-		}
-
-		if (HasCarryoverAtonement && TryUseAtonementContinuation(out act))
-		{
-			return true;
-		}
-
-		if (ConfiteorPvE.CanUse(out act, usedUp: true, skipAoeCheck: true))
-		{
-			return true;
-		}
-
-		return TryUseFoFFillers(out act);
-	}
-
-	private bool TryUseLilithFoFGCD(out IAction? act)
-	{
-		act = null;
-
-		if (BladeOfValorPvE.CanUse(out act, skipComboCheck: true))
-		{
-			return true;
-		}
-
-		if (BladeOfHonorPvE.CanUse(out _) && GoringBladePvE.CanUse(out act))
-		{
-			return true;
-		}
-
-		if (!HasConfiteorReady && ImperatorPvE.CanUse(out _))
-		{
-			return TryUseFoFFillers(out act);
-		}
-
-		if (ConfiteorPvE.CanUse(out act, usedUp: true, skipAoeCheck: true))
-		{
-			return true;
-		}
-
-		if (GoringBladePvE.CanUse(out act))
-		{
-			return true;
-		}
-
-		return TryUseFoFFillers(out act);
-	}
-
-	private bool TryUseFoFFillers(out IAction? act)
-	{
-		act = null;
-
-		if (TryUseAtonementContinuation(out act))
-		{
-			return true;
-		}
-
-		if (HasDivineMight && HolySpiritPvE.CanUse(out act, skipCastingCheck: true))
-		{
-			return true;
-		}
-
-		return false;
-	}
-
-	#endregion
-
-	#region Active Combo and Ready-State Recovery
 
 	private bool TryUseActiveConfiteorChain(out IAction? act)
 	{
 		act = null;
-
 		return ConfiteorPvE.CanUse(out act, usedUp: true, skipAoeCheck: true);
 	}
 
-	private bool TryUseExpiringBurstReady(out IAction? act)
+	private bool TryUseExpiringGoringBlade(out IAction? act)
 	{
 		act = null;
-
-		if (!HasFightOrFlight && GoringBladePvE.CanUse(out act))
-		{
-			return true;
-		}
-
-		return false;
+		return !HasFightOrFlight && GoringBladePvE.CanUse(out act);
 	}
 
-	#endregion
-
-	#region Atonement and Filler Logic
-
-	private bool TryUseAtonementContinuation(out IAction? act)
+	private bool TryUseJohannBurstFiller(out IAction? act)
 	{
 		act = null;
-		return SepulchrePvE.CanUse(out act, skipComboCheck: true)
-			|| SupplicationPvE.CanUse(out act, skipComboCheck: true)
-			|| AtonementPvE.CanUse(out act);
+		return TryUseAtonementContinuation(out act)
+			|| TryUseDivineMightHoly(out act);
 	}
 
-	private bool TryUseAtonementFillerGCD(out IAction? act)
+	private bool TryUseJohannAtonement(out IAction? act)
 	{
 		act = null;
 
-		if ((!FightOrFlightPvE.Cooldown.WillHaveOneCharge(1) || HasFightOrFlight
-			|| StatusHelper.PlayerWillStatusEndGCD(1, 0, true, StatusID.AtonementReady))
+		if (!ShouldHoldAtonementForFightOrFlight
+			&& (!FightOrFlightPvE.Cooldown.WillHaveOneCharge(1) || HasFightOrFlight || StatusHelper.PlayerWillStatusEndGCD(1, 0, true, StatusID.AtonementReady))
 			&& AtonementPvE.CanUse(out act))
 		{
 			return true;
 		}
 
-		if ((RoyalAuthorityPvE.CanUse(out _, skipComboCheck: false) || HasFightOrFlight
-			|| StatusHelper.PlayerWillStatusEndGCD(1, 0, true, StatusID.SupplicationReady))
+		if (TryUseJohannComboDrift(out act))
+		{
+			return true;
+		}
+
+		if (!ShouldHoldSupplicationForFightOrFlight
+			&& (RoyalAuthorityPvE.CanUse(out _, skipComboCheck: false) || RageOfHalonePvE.CanUse(out _, skipComboCheck: false)
+				|| HasFightOrFlight || StatusHelper.PlayerWillStatusEndGCD(1, 0, true, StatusID.SupplicationReady))
 			&& SupplicationPvE.CanUse(out act))
 		{
 			return true;
@@ -426,8 +369,9 @@ public sealed class FredderslyPLD : PaladinRotation
 			return true;
 		}
 
-		if ((RoyalAuthorityPvE.CanUse(out _, skipComboCheck: false) || HasFightOrFlight
-			|| StatusHelper.PlayerWillStatusEndGCD(1, 0, true, StatusID.SepulchreReady))
+		if (!ShouldHoldSepulchreForFightOrFlight
+			&& (RoyalAuthorityPvE.CanUse(out _, skipComboCheck: false) || RageOfHalonePvE.CanUse(out _, skipComboCheck: false)
+				|| HasFightOrFlight || StatusHelper.PlayerWillStatusEndGCD(1, 0, true, StatusID.SepulchreReady))
 			&& SepulchrePvE.CanUse(out act))
 		{
 			return true;
@@ -436,17 +380,53 @@ public sealed class FredderslyPLD : PaladinRotation
 		return false;
 	}
 
-	private bool TryUseFillerGCD(out IAction? act)
+	private bool TryUseJohannComboDrift(out IAction? act)
+	{
+		act = null;
+		if (HasFightOrFlight || StatusHelper.PlayerHasStatus(true, StatusID.Medicated)
+			|| RoyalAuthorityPvE.CanUse(out _, skipComboCheck: false)
+			|| RageOfHalonePvE.CanUse(out _, skipComboCheck: false)
+			|| TotalEclipsePvE.CanUse(out _))
+		{
+			return false;
+		}
+
+		if ((!HasAtonementReady && (SepulchreReady || SupplicationReady || HasDivineMight))
+			|| (HasAtonementReady && !HasDivineMight))
+		{
+			return RiotBladePvE.CanUse(out act) || FastBladePvE.CanUse(out act);
+		}
+
+		return false;
+	}
+
+	private bool TryUseAtonementContinuation(out IAction? act)
+	{
+		act = null;
+		return SepulchrePvE.CanUse(out act, skipComboCheck: true)
+			|| SupplicationPvE.CanUse(out act, skipComboCheck: true)
+			|| AtonementPvE.CanUse(out act);
+	}
+
+	private bool TryUseDivineMightHoly(out IAction? act)
+	{
+		act = null;
+		return HasDivineMight
+			&& !ShouldHoldDivineMightForFightOrFlight
+			&& HolySpiritPvE.CanUse(out act, skipCastingCheck: true);
+	}
+
+	private bool TryUseJohannFiller(out IAction? act)
 	{
 		act = null;
 
-		if ((HasDivineMight || RequiescatStacks > 0)
+		if ((RequiescatStacks > 0 || HasDivineMight && !ShouldHoldDivineMightForFightOrFlight)
 			&& HolyCirclePvE.CanUse(out act, skipCastingCheck: true))
 		{
 			return true;
 		}
 
-		if (ProminencePvE.CanUse(out act))
+		if (ProminencePvE.CanUse(out act, skipStatusProvideCheck: !EnhancedProminenceTrait.EnoughLevel))
 		{
 			return true;
 		}
@@ -456,7 +436,7 @@ public sealed class FredderslyPLD : PaladinRotation
 			return true;
 		}
 
-		if ((HasDivineMight || RequiescatStacks > 0)
+		if ((RequiescatStacks > 0 || HasDivineMight && !ShouldHoldDivineMightForFightOrFlight)
 			&& HolySpiritPvE.CanUse(out act, skipCastingCheck: true))
 		{
 			return true;
@@ -469,6 +449,11 @@ public sealed class FredderslyPLD : PaladinRotation
 		}
 
 		if (RoyalAuthorityPvE.CanUse(out act))
+		{
+			return true;
+		}
+
+		if (!RoyalAuthorityPvE.Info.EnoughLevelAndQuest() && RageOfHalonePvE.CanUse(out act))
 		{
 			return true;
 		}
@@ -495,6 +480,183 @@ public sealed class FredderslyPLD : PaladinRotation
 
 		return false;
 	}
+
+	#endregion
+
+	#region oGCD Skills
+
+	private bool TryUseJohannPotion(out IAction? act)
+	{
+		act = null;
+		return InCombat
+			&& (HasFightOrFlight || FightOrFlightPvE.Cooldown.WillHaveOneChargeGCD(1))
+			&& UseBurstMedicine(out act);
+	}
+
+	private bool TryUseFightOrFlight(IAction nextGCD, out IAction? act)
+	{
+		act = null;
+		return ShouldUseFightOrFlight(nextGCD) && FightOrFlightPvE.CanUse(out act);
+	}
+
+	private bool TryUseImperator(out IAction? act)
+	{
+		act = null;
+		return (IsLastAbility(true, FightOrFlightPvE) || HasFightOrFlight)
+			&& ImperatorPvE.CanUse(out act, skipAoeCheck: true, usedUp: true, skipTTKCheck: true);
+	}
+
+	private bool TryUseBladeOfHonor(out IAction? act)
+	{
+		act = null;
+		return BladeOfHonorPvE.CanUse(out act, skipAoeCheck: true);
+	}
+
+	private bool TryUseDamageOGCDs(out IAction? act)
+	{
+		act = null;
+
+		if (ExpiacionPvE.CanUse(out act, skipAoeCheck: true, skipTTKCheck: true))
+		{
+			return true;
+		}
+
+		if (!ExpiacionPvE.EnoughLevel && SpiritsWithinPvE.CanUse(out act, skipAoeCheck: true, skipTTKCheck: true))
+		{
+			return true;
+		}
+
+		if (CircleOfScornPvE.CanUse(out act, skipAoeCheck: true, skipTTKCheck: true))
+		{
+			return true;
+		}
+
+		if (!IsMoving && ShouldSpendInterveneForDamage && IntervenePvE.CanUse(out act, usedUp: HasFightOrFlight))
+		{
+			return true;
+		}
+
+		return false;
+	}
+
+	private bool TryUseEmergencyMitigation(out IAction? act)
+	{
+		act = null;
+
+		if (StatusHelper.PlayerHasStatus(true, StatusID.Cover) && HallowedWithCover && HallowedGroundPvE.CanUse(out act))
+		{
+			return true;
+		}
+
+		if (HallowedGroundPvE.CanUse(out act) && Player?.GetHealthRatio() <= HealthForDyingTanks)
+		{
+			return true;
+		}
+
+		if ((StatusHelper.PlayerHasStatus(true, StatusID.Rampart) || StatusHelper.PlayerHasStatus(true, StatusID.Sentinel))
+			&& InterventionPvE.CanUse(out act, skipTargetStatusNeedCheck: true)
+			&& InterventionPvE.Target.Target?.GetHealthRatio() < InterventionClutch)
+		{
+			return true;
+		}
+
+		return CoverPvE.CanUse(out act)
+			&& CoverPvE.Target.Target?.DistanceToPlayer() < 10
+			&& CoverPvE.Target.Target?.GetHealthRatio() < CoverRatio;
+	}
+
+	#endregion
+
+	#region Miscellaneous Methods
+
+	private bool ShouldUseFightOrFlight(IAction nextGCD)
+	{
+		if (!CanUseFightOrFlight)
+		{
+			return false;
+		}
+
+		if (CombatElapsedLessGCD(2))
+		{
+			return true;
+		}
+
+		if (!FastBladePvE.IsEnabled)
+		{
+			return true;
+		}
+
+		if (!RiotBladePvE.EnoughLevel)
+		{
+			return nextGCD.IsTheSameTo(true, FastBladePvE);
+		}
+
+		if (!RageOfHalonePvE.EnoughLevel)
+		{
+			return nextGCD.IsTheSameTo(true, RiotBladePvE, TotalEclipsePvE);
+		}
+
+		if (!ProminencePvE.EnoughLevel)
+		{
+			return nextGCD.IsTheSameTo(true, RageOfHalonePvE, TotalEclipsePvE);
+		}
+
+		if (!AtonementPvE.EnoughLevel)
+		{
+			return nextGCD.IsTheSameTo(true, RoyalAuthorityPvE, ProminencePvE);
+		}
+
+		return ImperatorPvE.Cooldown.WillHaveOneChargeGCD(1)
+			|| HasJohannBurstGCD
+			|| StatusHelper.PlayerHasStatus(true, StatusID.AtonementReady, StatusID.SepulchreReady, StatusID.SupplicationReady, StatusID.DivineMight)
+			|| IsLastAction(true, RoyalAuthorityPvE)
+			|| nextGCD.IsTheSameTo(true, AtonementPvE, SupplicationPvE, SepulchrePvE, HolySpiritPvE);
+	}
+
+	private bool ShouldHoldForFightOrFlight(StatusID status)
+	{
+		return FightOrFlightSoon && !StatusHelper.PlayerWillStatusEndGCD(2, 0, true, status);
+	}
+
+	private bool UseOath(out IAction? act)
+	{
+		if (InterventionPvE.Target.Target?.GetHealthRatio() <= InterventionRatio && InterventionPvE.CanUse(out act))
+		{
+			return true;
+		}
+
+		if (HolySheltronPvE.CanUse(out act) && HolySheltronPvE.EnoughLevel)
+		{
+			return true;
+		}
+
+		if (SheltronPvE.CanUse(out act) && !HolySheltronPvE.EnoughLevel)
+		{
+			return true;
+		}
+
+		return false;
+	}
+
+	public override bool CanHealSingleSpell
+	{
+		get
+		{
+			var aliveHealerCount = 0;
+			var healers = PartyMembers.GetJobCategory(JobRole.Healer);
+			foreach (var h in healers)
+			{
+				if (!h.IsDead)
+				{
+					aliveHealerCount++;
+				}
+			}
+
+			return base.CanHealSingleSpell && (GCDHeal || aliveHealerCount == 0);
+		}
+	}
+
+	#endregion
 
 	#endregion
 }
