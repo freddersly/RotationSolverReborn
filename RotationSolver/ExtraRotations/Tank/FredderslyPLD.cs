@@ -20,7 +20,7 @@ public sealed class FredderslyPLD : PaladinRotation
 
 	private bool ShouldHoldBladeOfHonorForLilith => IsLilithStyle
 		&& HasFightOrFlight
-		&& HasGoringBladeReady
+		&& GoringBladePvE.CanUse(out _)
 		&& BladeOfHonorPvE.CanUse(out _)
 		&& !BladeOfValorPvE.CanUse(out _, skipComboCheck: true);
 
@@ -57,7 +57,7 @@ public sealed class FredderslyPLD : PaladinRotation
 	{
 		ImGui.Text($"FoF Style: {ParserStyle}");
 		ImGui.Text($"In Fight or Flight: {HasFightOrFlight}");
-		ImGui.Text($"Goring Ready: {HasGoringBladeReady}");
+		ImGui.Text($"Goring Ready: {GoringBladePvE.CanUse(out _)}");
 		ImGui.Text($"Confiteor Ready: {HasConfiteorReady}");
 		ImGui.Text($"Atonement Ready: {HasAtonementReady}");
 		ImGui.Text($"Supplication Ready: {SupplicationReady}");
@@ -71,7 +71,6 @@ public sealed class FredderslyPLD : PaladinRotation
 
 	protected override IAction? CountDownAction(float remainTime)
 	{
-		// All three high parses either pre-cast Holy Spirit or begin from range.
 		if (remainTime <= 2.0f && HolySpiritPvE.CanUse(out var act))
 		{
 			return act;
@@ -93,7 +92,6 @@ public sealed class FredderslyPLD : PaladinRotation
 	{
 		act = null;
 
-		// Lilith intentionally uses Goring after Blade of Valor and before Blade of Honor.
 		if (ShouldHoldBladeOfHonorForLilith)
 		{
 			return false;
@@ -110,14 +108,11 @@ public sealed class FredderslyPLD : PaladinRotation
 			return false;
 		}
 
-		// Johann begins the opener immediately from the ranged pull. Hidey and Lilith
-		// complete Royal Authority first, then begin Fight or Flight.
 		if (CombatElapsedLessGCD(4))
 		{
 			return IsJohannStyle || IsLastGCD(ActionID.RoyalAuthorityPvE);
 		}
 
-		// Reopeners are on cooldown. Do not wait for a particular combo position.
 		return true;
 	}
 
@@ -138,8 +133,6 @@ public sealed class FredderslyPLD : PaladinRotation
 	{
 		act = null;
 
-		// Expiacion and Circle are 30s tools. They are buffed when naturally available,
-		// but not held long enough to lose their regular uses.
 		if (ExpiacionPvE.CanUse(out act, skipAoeCheck: true))
 		{
 			return true;
@@ -150,7 +143,6 @@ public sealed class FredderslyPLD : PaladinRotation
 			return true;
 		}
 
-		// Intervene is damage inside FoF; retain it for movement otherwise.
 		if (HasFightOrFlight && IntervenePvE.CanUse(out act, usedUp: DumpInterveneInFoF))
 		{
 			return true;
@@ -239,9 +231,6 @@ public sealed class FredderslyPLD : PaladinRotation
 
 	protected override bool GeneralGCD(out IAction? act)
 	{
-		// A transformed Confiteor chain is normally protected from interruption.
-		// Lilith is the deliberate exception at Blade of Valor, where Goring is placed
-		// before the following Blade of Honor weave.
 		if (HasFightOrFlight && TryUseSelectedFoFBurstGCD(out act))
 		{
 			return true;
@@ -289,9 +278,6 @@ public sealed class FredderslyPLD : PaladinRotation
 	{
 		act = null;
 
-		// Johann: Confiteor → Faith → Truth → Valor, weave Honor, then Goring.
-		// Do not spend Goring before Imperator has armed the Confiteor chain.
-		// The oGCD selector will weave Imperator against the selected filler GCD.
 		if (!HasConfiteorReady && ImperatorPvE.CanUse(out _))
 		{
 			return TryUseFoFFillers(out act);
@@ -314,8 +300,6 @@ public sealed class FredderslyPLD : PaladinRotation
 	{
 		act = null;
 
-		// Hidey: Goring first. If an Atonement chain was already in progress,
-		// carry only Supplication/Sepulchre before starting Confiteor.
 		if (GoringBladePvE.CanUse(out act))
 		{
 			return true;
@@ -338,8 +322,6 @@ public sealed class FredderslyPLD : PaladinRotation
 	{
 		act = null;
 
-		// Lilith: begin the Confiteor chain normally, but after Blade of Valor,
-		// spend Goring before the Blade of Honor weave.
 		if (BladeOfValorPvE.CanUse(out act, skipComboCheck: true))
 		{
 			return true;
@@ -350,7 +332,6 @@ public sealed class FredderslyPLD : PaladinRotation
 			return true;
 		}
 
-		// Like Johann, Lilith starts the Confiteor package before Goring.
 		if (!HasConfiteorReady && ImperatorPvE.CanUse(out _))
 		{
 			return TryUseFoFFillers(out act);
@@ -394,8 +375,6 @@ public sealed class FredderslyPLD : PaladinRotation
 	{
 		act = null;
 
-		// Once FoF is no longer active, always complete a chain rather than let
-		// the remaining Confiteor state sit unused.
 		return ConfiteorPvE.CanUse(out act, usedUp: true, skipAoeCheck: true);
 	}
 
@@ -403,10 +382,7 @@ public sealed class FredderslyPLD : PaladinRotation
 	{
 		act = null;
 
-		// Goring Blade Ready lasts 30 seconds. Outside an active FoF planner it
-		// is consumed promptly so a missed or delayed window cannot waste it.
-		// During FoF, the selected parser-style planner owns Goring placement.
-		if (!HasFightOrFlight && HasGoringBladeReady && GoringBladePvE.CanUse(out act))
+		if (!HasFightOrFlight && GoringBladePvE.CanUse(out act))
 		{
 			return true;
 		}
@@ -430,9 +406,6 @@ public sealed class FredderslyPLD : PaladinRotation
 	{
 		act = null;
 
-		// Preserve the stock priority's useful behavior: first Atonement can be
-		// taken immediately, while later steps may be interleaved with combo GCDs
-		// unless their 30-second ready states are about to expire.
 		if ((!FightOrFlightPvE.Cooldown.WillHaveOneCharge(1) || HasFightOrFlight
 			|| StatusHelper.PlayerWillStatusEndGCD(1, 0, true, StatusID.AtonementReady))
 			&& AtonementPvE.CanUse(out act))
@@ -467,7 +440,6 @@ public sealed class FredderslyPLD : PaladinRotation
 	{
 		act = null;
 
-		// AoE fallback.
 		if ((HasDivineMight || RequiescatStacks > 0)
 			&& HolyCirclePvE.CanUse(out act, skipCastingCheck: true))
 		{
@@ -484,7 +456,6 @@ public sealed class FredderslyPLD : PaladinRotation
 			return true;
 		}
 
-		// Single-target filler.
 		if ((HasDivineMight || RequiescatStacks > 0)
 			&& HolySpiritPvE.CanUse(out act, skipCastingCheck: true))
 		{
@@ -512,7 +483,6 @@ public sealed class FredderslyPLD : PaladinRotation
 			return true;
 		}
 
-		// Ranged downtime.
 		if (UseHolyWhenAway && StopMovingTime > 1 && HolySpiritPvE.CanUse(out act))
 		{
 			return true;
