@@ -1,4 +1,4 @@
-// FredderslyPLD Test Version: 2026-06-29.1710-FoFCombatGate-ShieldLobGate
+// FredderslyPLD Test Version: 2026-06-29.2-FoFWeaveSlot-ComboDrift-ProcGating
 
 namespace RotationSolver.ExtraRotations.Tank;
 
@@ -18,8 +18,7 @@ public sealed class FredderslyPLD : PaladinRotation
 		|| IsLastAbility(true, CoverPvE);
 
 	private bool CanUseJohannPullFightOrFlight => UseJohannShieldLobPull
-		&& CombatElapsedLessGCD(2)
-		&& IsLastGCD(true, ShieldLobPvE);
+		&& CombatElapsedLessGCD(2);
 	private bool CanUseFightOrFlight => HasHostilesInRange || !MeleeFoF || CanUseJohannPullFightOrFlight;
 	private bool IsStartingFightOrFlight => HasFightOrFlight || IsLastAbility(true, FightOrFlightPvE);
 
@@ -401,7 +400,8 @@ public sealed class FredderslyPLD : PaladinRotation
 		}
 
 		if (!ShouldHoldSupplicationForFightOrFlight
-			&& (RoyalAuthorityPvE.CanUse(out _, skipComboCheck: false) || RageOfHalonePvE.CanUse(out _, skipComboCheck: false)
+			&& (!FightOrFlightPvE.Cooldown.WillHaveOneCharge(1)
+				|| RoyalAuthorityPvE.CanUse(out _, skipComboCheck: false) || RageOfHalonePvE.CanUse(out _, skipComboCheck: false)
 				|| HasFightOrFlight || StatusHelper.PlayerWillStatusEndGCD(1, 0, true, StatusID.SupplicationReady))
 			&& SupplicationPvE.CanUse(out act))
 		{
@@ -415,7 +415,8 @@ public sealed class FredderslyPLD : PaladinRotation
 		}
 
 		if (!ShouldHoldSepulchreForFightOrFlight
-			&& (RoyalAuthorityPvE.CanUse(out _, skipComboCheck: false) || RageOfHalonePvE.CanUse(out _, skipComboCheck: false)
+			&& (!FightOrFlightPvE.Cooldown.WillHaveOneCharge(1)
+				|| RoyalAuthorityPvE.CanUse(out _, skipComboCheck: false) || RageOfHalonePvE.CanUse(out _, skipComboCheck: false)
 				|| HasFightOrFlight || StatusHelper.PlayerWillStatusEndGCD(1, 0, true, StatusID.SepulchreReady))
 			&& SepulchrePvE.CanUse(out act))
 		{
@@ -436,7 +437,7 @@ public sealed class FredderslyPLD : PaladinRotation
 			return false;
 		}
 
-		if ((!HasAtonementReady && (SepulchreReady || SupplicationReady || HasDivineMight))
+		if ((!HasAtonementReady && HasDivineMight && !SupplicationReady && !SepulchreReady)
 			|| (HasAtonementReady && !HasDivineMight))
 		{
 			return RiotBladePvE.CanUse(out act) || FastBladePvE.CanUse(out act);
