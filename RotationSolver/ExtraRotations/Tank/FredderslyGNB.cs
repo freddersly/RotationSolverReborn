@@ -9,6 +9,8 @@ namespace RotationSolver.ExtraRotations.Tank;
 public sealed class FredderslyGNB : GunbreakerRotation
 {
 	private const float FillerGnashingHoldWindow = 7f;
+	// Fixed for the recommended 2.50-GCD top-parser loop.
+	private const bool UseTop250GnashingOptimization = true;
 
 	private static bool InSolidBarrelCombo => LiveComboTime > 0f && IsLastComboAction(ActionID.KeenEdgePvE, ActionID.BrutalShellPvE);
 
@@ -21,32 +23,27 @@ public sealed class FredderslyGNB : GunbreakerRotation
 
 		if (HasNoMercy)
 		{
-			return true;
+			// The second Gnashing starts after Sonic Break, Double Down,
+			// and the Reign packet, matching the top 2.50 logs.
+			return !SonicBreakPvE.CanUse(out _)
+				&& !DoubleDownPvE.CanUse(out _)
+				&& !ReignOfBeastsPvE.CanUse(out _, skipComboCheck: true)
+				&& !InReignCombo;
 		}
 
-		// Do not start the filler Gnashing Fang while the normal Solid Barrel
-		// combo is active; that combo timer can expire after the burst phase.
+		// Do not begin the 7-second setup in the middle of Keen Edge → Brutal Shell.
 		if (InSolidBarrelCombo)
 		{
 			return false;
 		}
 
-		if (!Use250GnashingOptimization)
-		{
-			return true;
-		}
-
-		// Start the filler Gnashing Fang at the guide's hold window so an
-		// extra Gnashing GCD or continuation can land inside No Mercy. Gate on
-		// No Mercy already cooling down so the opener doesn't rush Gnashing Fang
-		// before the first No Mercy (its charge is up from the pull).
 		return NoMercyPvE.Cooldown.IsCoolingDown
 			&& NoMercyPvE.Cooldown.WillHaveOneCharge(FillerGnashingHoldWindow);
 	}
 
 	private bool ShouldStallForGnashingFang()
 	{
-		return Use250GnashingOptimization
+		return UseTop250GnashingOptimization
 			&& AmmoComboStep == 0
 			&& Ammo > 1
 			&& GnashingFangPvE.Cooldown.HasOneCharge
@@ -58,56 +55,50 @@ public sealed class FredderslyGNB : GunbreakerRotation
 
 	private bool ShouldHoldEyeGougeForNoMercy()
 	{
-		return ReignOfBeastsPvE.EnoughLevel
-			&& HasBloodfest
-			&& HasReadyToGouge
+		// Use No Mercy after Wicked Talon, then weave Eye Gouge immediately.
+		return HasReadyToGouge
 			&& !HasNoMercy
 			&& NoMercyPvE.CanUse(out _);
 	}
 
 	private bool ShouldUseLevel100NoMercy(IAction nextGCD)
 	{
-		// NM after Brutal Shell; delayed opener fires NM before Bloodfest so don't gate on it.
-		// Window covers Lightning Shot opening the GCD clock when there's no countdown.
+		// Opener: start after Brutal Shell. Later windows: start after Wicked Talon
+		// so Eye Gouge is the first continuation inside No Mercy.
 		if (CombatElapsedLessGCD(4) && IsLastComboAction(ActionID.BrutalShellPvE))
-		{
-			return OpenerVariant == OpenerStrategy.DelayedBloodfest || HasBloodfest;
-		}
-
-		if (!HasBloodfest)
-		{
-			return false;
-		}
-
-		// Top logs often ramp with Gnashing Fang first, then weave No Mercy
-		// before Eye Gouge and the Sonic/Double Down/Reign burst packet.
-		if (HasReadyToGouge)
 		{
 			return true;
 		}
 
-		return nextGCD.IsTheSameTo(false,
-			(ActionID)SonicBreakPvE.ID,
-			(ActionID)DoubleDownPvE.ID,
-			(ActionID)ReignOfBeastsPvE.ID);
+		return HasReadyToGouge;
+	}
+
+	private bool TryUseTop250BurstGCD(out IAction? act)
+	{
+		act = null;
+		if (!HasNoMercy)
+		{
+			return false;
+		}
+
+		// Never break an already-started Gnashing or Reign sequence.
+		if (SavageClawPvE.CanUse(out act, skipComboCheck: true)) return true;
+		if (WickedTalonPvE.CanUse(out act, skipComboCheck: true)) return true;
+		if (LionHeartPvE.CanUse(out act, skipComboCheck: true)) return true;
+		if (NobleBloodPvE.CanUse(out act, skipComboCheck: true)) return true;
+
+		// Shared top-log packet after Eye Gouge.
+		if (SonicBreakPvE.CanUse(out act)) return true;
+		if (DoubleDownPvE.CanUse(out act)) return true;
+		if (ReignOfBeastsPvE.CanUse(out act, skipComboCheck: true)) return true;
+
+		// Start the second Gnashing only once the hard burst GCDs are committed.
+		return GnashingFangPvE.CanUse(out act, skipComboCheck: true, usedUp: true);
 	}
 
 	#region Config Options
-	[RotationConfig(CombatType.PvE, Name = "Use 2.50 Gnashing Fang Optimization")]
-	public bool Use250GnashingOptimization { get; set; } = true;
-
-	[RotationConfig(CombatType.PvE, Name = "Opener variant (Bloodfest timing)")]
-	public OpenerStrategy OpenerVariant { get; set; } = OpenerStrategy.EarlyBloodfest;
-
-	public enum OpenerStrategy : byte
-	{
-		[Description("Early Bloodfest")]
-		EarlyBloodfest,
-
-		[Description("Delayed Bloodfest")]
-		DelayedBloodfest,
-	}
-
+	// Damage profile is intentionally fixed to the recommended 2.50 top-parser loop.
+	// Keep only utility targeting settings configurable.
 	[RotationConfig(CombatType.PvE, Name = "How to use Aurora")]
 	public AuroraUsageStrategy AuroraUsage { get; set; } = AuroraUsageStrategy.TankbusterTarget;
 
@@ -403,21 +394,14 @@ public sealed class FredderslyGNB : GunbreakerRotation
 
 		if (BloodfestPvE.CanUse(out act))
 		{
-			// delayed opener: hold Bloodfest until NM is up
-			bool holdForDelayedOpener = OpenerVariant == OpenerStrategy.DelayedBloodfest
-				&& CombatElapsedLessGCD(3)
-				&& !HasNoMercy;
-
-			if (!holdForDelayedOpener
-				&& (HasNoMercy
-					|| !NoMercyPvE.EnoughLevel
-					|| NoMercyPvE.Cooldown.WillHaveOneCharge(FillerGnashingHoldWindow)
-					|| InGnashingFang
-					|| HasReadyToGouge))
+			// Rank-1 profile: No Mercy first, then Bloodfest feeds Double Down
+			// and Ready to Reign inside the active window.
+			if (HasNoMercy || !NoMercyPvE.EnoughLevel || !NoMercyPvE.IsEnabled)
 			{
 				return true;
 			}
 		}
+
 
 		if (nextGCD.IsTheSameTo(false, (ActionID)GnashingFangPvE.ID) && !NoMercyPvE.Cooldown.IsCoolingDown)
 		{
@@ -484,6 +468,11 @@ public sealed class FredderslyGNB : GunbreakerRotation
 	#region GCD Logic
 	protected override bool GeneralGCD(out IAction? act)
 	{
+		if (TryUseTop250BurstGCD(out act))
+		{
+			return true;
+		}
+
 		if (BurstStrikePvE.CanUse(out act))
 		{
 			if (IsAmmoCapped && SolidBarrelPvE.CanUse(out _))
