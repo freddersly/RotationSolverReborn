@@ -10,8 +10,16 @@ public sealed class FredderslyPLD : PaladinRotation
 	private static bool InConfiteorCombo => BladeOfFaithReady || BladeOfTruthReady || BladeOfValorReady;
 	private static bool HasJohannBurstGCD => HasConfiteorReady || InConfiteorCombo;
 
-	private bool CanUseJohannPullFightOrFlight => UseJohannShieldLobPull && CombatElapsedLessGCD(2);
+	private bool JustUsedOath => IsLastAbility(true, HolySheltronPvE)
+		|| IsLastAbility(true, SheltronPvE)
+		|| IsLastAbility(true, InterventionPvE)
+		|| IsLastAbility(true, CoverPvE);
+
+	private bool CanUseJohannPullFightOrFlight => UseJohannShieldLobPull
+		&& CombatElapsedLessGCD(2)
+		&& IsLastGCD(true, ShieldLobPvE);
 	private bool CanUseFightOrFlight => HasHostilesInRange || !MeleeFoF || CanUseJohannPullFightOrFlight;
+	private bool IsStartingFightOrFlight => HasFightOrFlight || IsLastAbility(true, FightOrFlightPvE);
 
 	private bool FightOrFlightSoon => !HasFightOrFlight
 		&& CanUseFightOrFlight
@@ -26,15 +34,18 @@ public sealed class FredderslyPLD : PaladinRotation
 		&& ImperatorPvE.IsEnabled
 		&& (!ImperatorPvE.Cooldown.IsCoolingDown || ImperatorPvE.Cooldown.WillHaveOneCharge(3f));
 
-	private bool ShouldWaitForImperator => HasFightOrFlight
+	private bool ShouldWaitForImperator => IsStartingFightOrFlight
 		&& !HasJohannBurstGCD
 		&& ImperatorReadyForJohannBurst;
 
-	private bool ShouldHoldDamageOGCDsForImperator => HasFightOrFlight
+	private bool ShouldHoldDamageOGCDsForImperator => IsStartingFightOrFlight
 		&& ImperatorPvE.EnoughLevel
 		&& ImperatorPvE.IsEnabled
 		&& !HasJohannBurstGCD
 		&& (!ImperatorPvE.Cooldown.IsCoolingDown || ImperatorPvE.Cooldown.WillHaveOneCharge(5f));
+
+	private bool DamageOGCDsUnlockedByImperator => FightOrFlightPvE.Cooldown.IsCoolingDown
+		&& (ImperatorPvE.EnoughLevel && ImperatorPvE.Cooldown.IsCoolingDown || !ImperatorPvE.EnoughLevel);
 
 	private bool ShouldHoldAtonementForFightOrFlight => ShouldHoldForFightOrFlight(StatusID.AtonementReady)
 		&& !RoyalAuthorityPvE.CanUse(out _, skipComboCheck: false)
@@ -543,7 +554,7 @@ public sealed class FredderslyPLD : PaladinRotation
 	{
 		act = null;
 
-		if (ShouldHoldDamageOGCDsForImperator)
+		if (!DamageOGCDsUnlockedByImperator)
 		{
 			return false;
 		}
@@ -613,9 +624,14 @@ public sealed class FredderslyPLD : PaladinRotation
 			return false;
 		}
 
+		if (JustUsedOath)
+		{
+			return false;
+		}
+
 		if (CombatElapsedLessGCD(2))
 		{
-			return true;
+			return CanUseJohannPullFightOrFlight || HasHostilesInRange;
 		}
 
 		if (!FastBladePvE.IsEnabled)
