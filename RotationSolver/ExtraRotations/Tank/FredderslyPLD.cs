@@ -1,3 +1,5 @@
+// FredderslyPLD Test Version: 2026-06-29.1634-FoFCombatGate-ShieldLobGate
+
 namespace RotationSolver.ExtraRotations.Tank;
 
 [Rotation("FredderslyPLD", CombatType.PvE, GameVersion = "7.5", Description = "Johann Collin-inspired Paladin priority model for Lindwurm-style Fight or Flight windows.")]
@@ -614,7 +616,7 @@ public sealed class FredderslyPLD : PaladinRotation
 
 	private bool ShouldUseFightOrFlight(IAction nextGCD)
 	{
-		if (!CanUseFightOrFlight)
+		if (!InCombat || !CanUseFightOrFlight)
 		{
 			return false;
 		}
@@ -631,7 +633,7 @@ public sealed class FredderslyPLD : PaladinRotation
 
 		if (CombatElapsedLessGCD(2))
 		{
-			return CanUseJohannPullFightOrFlight || HasHostilesInRange;
+			return UseJohannShieldLobPull ? CanUseJohannPullFightOrFlight : HasHostilesInRange;
 		}
 
 		if (!FastBladePvE.IsEnabled)
