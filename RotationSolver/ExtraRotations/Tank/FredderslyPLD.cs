@@ -16,7 +16,9 @@ public sealed class FredderslyPLD : PaladinRotation
 		&& CanUseFightOrFlight
 		&& FightOrFlightPvE.Cooldown.WillHaveOneChargeGCD(2);
 
-	private bool ImperatorReadyForJohannBurst => ImperatorPvE.CanUse(out _, skipAoeCheck: true, usedUp: true, skipTTKCheck: true);
+	private bool ImperatorReadyForJohannBurst => ImperatorPvE.EnoughLevel
+		&& ImperatorPvE.IsEnabled
+		&& (!ImperatorPvE.Cooldown.IsCoolingDown || ImperatorPvE.Cooldown.WillHaveOneChargeGCD(1));
 
 	private bool ShouldWaitForImperator => HasFightOrFlight
 		&& !HasJohannBurstGCD
@@ -29,8 +31,9 @@ public sealed class FredderslyPLD : PaladinRotation
 	private bool ShouldHoldSupplicationForFightOrFlight => ShouldHoldForFightOrFlight(StatusID.SupplicationReady);
 	private bool ShouldHoldSepulchreForFightOrFlight => ShouldHoldForFightOrFlight(StatusID.SepulchreReady);
 	private bool ShouldHoldDivineMightForFightOrFlight => ShouldHoldForFightOrFlight(StatusID.DivineMight);
-	private bool ShouldSpendInterveneForDamage => !HasFightOrFlight
-		|| IntervenePvE.Cooldown.CurrentCharges > IntervenePvE.Cooldown.MaxCharges - InterveneChargesToSpendInFightOrFlight;
+	private bool ShouldSpendInterveneForDamage => HasFightOrFlight
+		&& InterveneChargesToSpendInFightOrFlight > 0
+		&& IntervenePvE.Cooldown.CurrentCharges > IntervenePvE.Cooldown.MaxCharges - InterveneChargesToSpendInFightOrFlight;
 
 	#endregion
 
@@ -237,10 +240,12 @@ public sealed class FredderslyPLD : PaladinRotation
 		return base.GeneralAbility(nextGCD, out act);
 	}
 
-	[RotationDesc(ActionID.IntervenePvE, ActionID.SpiritsWithinPvE, ActionID.ExpiacionPvE, ActionID.CircleOfScornPvE)]
+	[RotationDesc(ActionID.ImperatorPvE, ActionID.BladeOfHonorPvE, ActionID.IntervenePvE, ActionID.SpiritsWithinPvE, ActionID.ExpiacionPvE, ActionID.CircleOfScornPvE)]
 	protected override bool AttackAbility(IAction nextGCD, out IAction? act)
 	{
-		return TryUseDamageOGCDs(out act)
+		return TryUseImperator(out act)
+			|| TryUseBladeOfHonor(out act)
+			|| TryUseDamageOGCDs(out act)
 			|| base.AttackAbility(nextGCD, out act);
 	}
 
