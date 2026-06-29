@@ -17,17 +17,24 @@ public sealed class FredderslyPLD : PaladinRotation
 		&& CanUseFightOrFlight
 		&& FightOrFlightPvE.Cooldown.WillHaveOneChargeGCD(2);
 
+	private bool ImperatorAlignedForFightOrFlight => !ImperatorPvE.EnoughLevel
+		|| !ImperatorPvE.IsEnabled
+		|| !ImperatorPvE.Cooldown.IsCoolingDown
+		|| ImperatorPvE.Cooldown.WillHaveOneCharge(1.5f);
+
 	private bool ImperatorReadyForJohannBurst => ImperatorPvE.EnoughLevel
 		&& ImperatorPvE.IsEnabled
-		&& (!ImperatorPvE.Cooldown.IsCoolingDown || ImperatorPvE.Cooldown.WillHaveOneChargeGCD(1));
+		&& (!ImperatorPvE.Cooldown.IsCoolingDown || ImperatorPvE.Cooldown.WillHaveOneCharge(3f));
 
 	private bool ShouldWaitForImperator => HasFightOrFlight
 		&& !HasJohannBurstGCD
 		&& ImperatorReadyForJohannBurst;
 
 	private bool ShouldHoldDamageOGCDsForImperator => HasFightOrFlight
-		&& !InConfiteorCombo
-		&& (HasConfiteorReady || ImperatorReadyForJohannBurst);
+		&& ImperatorPvE.EnoughLevel
+		&& ImperatorPvE.IsEnabled
+		&& !HasJohannBurstGCD
+		&& (!ImperatorPvE.Cooldown.IsCoolingDown || ImperatorPvE.Cooldown.WillHaveOneCharge(5f));
 
 	private bool ShouldHoldAtonementForFightOrFlight => ShouldHoldForFightOrFlight(StatusID.AtonementReady)
 		&& !RoyalAuthorityPvE.CanUse(out _, skipComboCheck: false)
@@ -248,8 +255,18 @@ public sealed class FredderslyPLD : PaladinRotation
 	[RotationDesc(ActionID.ImperatorPvE, ActionID.BladeOfHonorPvE, ActionID.IntervenePvE, ActionID.SpiritsWithinPvE, ActionID.ExpiacionPvE, ActionID.CircleOfScornPvE)]
 	protected override bool AttackAbility(IAction nextGCD, out IAction? act)
 	{
-		return TryUseImperator(out act)
-			|| TryUseBladeOfHonor(out act)
+		if (TryUseImperator(out act))
+		{
+			return true;
+		}
+
+		if (ShouldHoldDamageOGCDsForImperator)
+		{
+			act = null;
+			return false;
+		}
+
+		return TryUseBladeOfHonor(out act)
 			|| TryUseDamageOGCDs(out act)
 			|| base.AttackAbility(nextGCD, out act);
 	}
@@ -587,6 +604,11 @@ public sealed class FredderslyPLD : PaladinRotation
 	private bool ShouldUseFightOrFlight(IAction nextGCD)
 	{
 		if (!CanUseFightOrFlight)
+		{
+			return false;
+		}
+
+		if (!ImperatorAlignedForFightOrFlight)
 		{
 			return false;
 		}
