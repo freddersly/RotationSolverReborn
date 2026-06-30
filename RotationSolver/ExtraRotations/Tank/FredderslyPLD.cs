@@ -1,4 +1,4 @@
-// FredderslyPLD Test Version: 2026-06-29.2-FoFWeaveSlot-ComboDrift-ProcGating
+// FredderslyPLD Test Version: 2026-06-29.3-OathDeadlock
 
 namespace RotationSolver.ExtraRotations.Tank;
 
@@ -24,6 +24,7 @@ public sealed class FredderslyPLD : PaladinRotation
 
 	private bool FightOrFlightSoon => !HasFightOrFlight
 		&& CanUseFightOrFlight
+		&& FightOrFlightPvE.Cooldown.IsCoolingDown
 		&& FightOrFlightPvE.Cooldown.WillHaveOneChargeGCD(2);
 
 	private bool ImperatorAlignedForFightOrFlight => !ImperatorPvE.EnoughLevel
@@ -45,8 +46,10 @@ public sealed class FredderslyPLD : PaladinRotation
 		&& !HasJohannBurstGCD
 		&& (!ImperatorPvE.Cooldown.IsCoolingDown || ImperatorPvE.Cooldown.WillHaveOneCharge(5f));
 
-	private bool DamageOGCDsUnlockedByImperator => FightOrFlightPvE.Cooldown.IsCoolingDown
-		&& (ImperatorPvE.EnoughLevel && ImperatorPvE.Cooldown.IsCoolingDown || !ImperatorPvE.EnoughLevel);
+	private bool DamageOGCDsUnlockedByImperator =>
+		(FightOrFlightPvE.Cooldown.IsCoolingDown
+			&& (ImperatorPvE.EnoughLevel && ImperatorPvE.Cooldown.IsCoolingDown || !ImperatorPvE.EnoughLevel))
+		|| (!FightOrFlightPvE.Cooldown.IsCoolingDown && (!ImperatorPvE.EnoughLevel || !ImperatorPvE.Cooldown.IsCoolingDown));
 
 	private bool ShouldHoldAtonementForFightOrFlight => ShouldHoldForFightOrFlight(StatusID.AtonementReady)
 		&& !RoyalAuthorityPvE.CanUse(out _, skipComboCheck: false)
@@ -628,11 +631,6 @@ public sealed class FredderslyPLD : PaladinRotation
 		}
 
 		if (!ImperatorAlignedForFightOrFlight)
-		{
-			return false;
-		}
-
-		if (JustUsedOath)
 		{
 			return false;
 		}
