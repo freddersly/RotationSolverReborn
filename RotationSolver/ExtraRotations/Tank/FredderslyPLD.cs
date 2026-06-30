@@ -155,7 +155,13 @@ public sealed class FredderslyPLD : PaladinRotation
 			return act;
 		}
 
-		if (UseJohannShieldLobPull && remainTime <= 0.6f && ShieldLobPvE.CanUse(out act))
+		if (UseJohannShieldLobPull && remainTime <= 1.5f && ShieldLobPvE.CanUse(out act))
+		{
+			return act;
+		}
+
+		if (!UseJohannShieldLobPull && remainTime < HolySpiritPvE.Info.CastTime + CountDownAhead
+			&& HolySpiritPvE.CanUse(out act))
 		{
 			return act;
 		}
