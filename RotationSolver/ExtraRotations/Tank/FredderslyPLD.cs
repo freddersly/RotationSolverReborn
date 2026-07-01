@@ -1,4 +1,4 @@
-// FredderslyPLD Test Version: 2026-06-29.3-OathDeadlock
+// FredderslyPLD Test Version: 2026-07-01.1-CountdownPullFallback
 
 namespace RotationSolver.ExtraRotations.Tank;
 
@@ -11,11 +11,6 @@ public sealed class FredderslyPLD : PaladinRotation
 
 	private static bool InConfiteorCombo => BladeOfFaithReady || BladeOfTruthReady || BladeOfValorReady;
 	private static bool HasJohannBurstGCD => HasConfiteorReady || InConfiteorCombo;
-
-	private bool JustUsedOath => IsLastAbility(true, HolySheltronPvE)
-		|| IsLastAbility(true, SheltronPvE)
-		|| IsLastAbility(true, InterventionPvE)
-		|| IsLastAbility(true, CoverPvE);
 
 	private bool CanUseJohannPullFightOrFlight => UseJohannShieldLobPull
 		&& CombatElapsedLessGCD(2);
@@ -156,6 +151,13 @@ public sealed class FredderslyPLD : PaladinRotation
 		}
 
 		if (UseJohannShieldLobPull && remainTime <= 1.5f && ShieldLobPvE.CanUse(out act))
+		{
+			return act;
+		}
+
+		// Shield Lob is a MeleeRangedAttack special type and refuses targets closer than
+		// 3y + MeleeRangedOffset, so fall back to Fast Blade when already in melee range.
+		if (UseJohannShieldLobPull && remainTime <= 0.58f && FastBladePvE.CanUse(out act))
 		{
 			return act;
 		}
