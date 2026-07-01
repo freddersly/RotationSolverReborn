@@ -1,4 +1,4 @@
-// FredderslyPLD Test Version: 2026-07-01.3-ScrapLobPull
+// FredderslyPLD Test Version: 2026-07-01.4-ComboBreakFix
 
 namespace RotationSolver.ExtraRotations.Tank;
 
@@ -44,13 +44,21 @@ public sealed class FredderslyPLD : PaladinRotation
 			&& (ImperatorPvE.EnoughLevel && ImperatorPvE.Cooldown.IsCoolingDown || !ImperatorPvE.EnoughLevel))
 		|| (!FightOrFlightPvE.Cooldown.IsCoolingDown && (!ImperatorPvE.EnoughLevel || !ImperatorPvE.Cooldown.IsCoolingDown));
 
+	// skipStatusProvideCheck: Royal Authority is status-blocked while Divine Might or
+	// Atonement Ready is up, so a plain CanUse can't tell us the combo is pending.
+	private bool RoyalAuthorityComboPending => RoyalAuthorityPvE.CanUse(out _, skipStatusProvideCheck: true, skipComboCheck: false)
+		|| RageOfHalonePvE.CanUse(out _, skipStatusProvideCheck: true, skipComboCheck: false);
+
 	private bool ShouldHoldAtonementForFightOrFlight => ShouldHoldForFightOrFlight(StatusID.AtonementReady)
-		&& !RoyalAuthorityPvE.CanUse(out _, skipComboCheck: false)
-		&& !RageOfHalonePvE.CanUse(out _, skipComboCheck: false);
+		&& !RoyalAuthorityComboPending;
 
 	private bool ShouldHoldSupplicationForFightOrFlight => ShouldHoldForFightOrFlight(StatusID.SupplicationReady);
 	private bool ShouldHoldSepulchreForFightOrFlight => ShouldHoldForFightOrFlight(StatusID.SepulchreReady);
-	private bool ShouldHoldDivineMightForFightOrFlight => ShouldHoldForFightOrFlight(StatusID.DivineMight);
+
+	// Released when Royal Authority is combo-pending: holding Divine Might would status-block
+	// Royal Authority and dead-end the combo into Fast Blade.
+	private bool ShouldHoldDivineMightForFightOrFlight => ShouldHoldForFightOrFlight(StatusID.DivineMight)
+		&& !RoyalAuthorityComboPending;
 	private bool ShouldSpendInterveneForDamage => HasFightOrFlight
 		&& InterveneChargesToSpendInFightOrFlight > 0
 		&& IntervenePvE.Cooldown.CurrentCharges > IntervenePvE.Cooldown.MaxCharges - InterveneChargesToSpendInFightOrFlight;
@@ -419,8 +427,7 @@ public sealed class FredderslyPLD : PaladinRotation
 	{
 		act = null;
 		if (HasFightOrFlight || StatusHelper.PlayerHasStatus(true, StatusID.Medicated)
-			|| RoyalAuthorityPvE.CanUse(out _, skipComboCheck: false)
-			|| RageOfHalonePvE.CanUse(out _, skipComboCheck: false)
+			|| RoyalAuthorityComboPending
 			|| TotalEclipsePvE.CanUse(out _))
 		{
 			return false;
