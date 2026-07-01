@@ -1,4 +1,4 @@
-// FredderslyPLD Test Version: 2026-07-01.1-CountdownPullFallback
+// FredderslyPLD Test Version: 2026-07-01.2-StandardOpener
 
 namespace RotationSolver.ExtraRotations.Tank;
 
@@ -545,9 +545,19 @@ public sealed class FredderslyPLD : PaladinRotation
 	private bool TryUseJohannPotion(out IAction? act)
 	{
 		act = null;
-		return InCombat
-			&& HasFightOrFlight
-			&& UseBurstMedicine(out act);
+		if (!InCombat)
+		{
+			return false;
+		}
+
+		// Standard opener pots in Riot Blade's weave slot, two GCDs before Fight or Flight.
+		if (!UseJohannShieldLobPull && CombatElapsedLessGCD(3) && IsLastGCD(true, RiotBladePvE)
+			&& UseBurstMedicine(out act))
+		{
+			return true;
+		}
+
+		return HasFightOrFlight && UseBurstMedicine(out act);
 	}
 
 	private bool TryUseFightOrFlight(IAction nextGCD, out IAction? act)
@@ -643,9 +653,11 @@ public sealed class FredderslyPLD : PaladinRotation
 			return false;
 		}
 
+		// Standard opener (no Shield Lob pull) holds Fight or Flight through the first
+		// combo GCDs; the final gate then fires it in Royal Authority's weave slot.
 		if (CombatElapsedLessGCD(2))
 		{
-			return UseJohannShieldLobPull ? CanUseJohannPullFightOrFlight : HasHostilesInRange;
+			return UseJohannShieldLobPull && CanUseJohannPullFightOrFlight;
 		}
 
 		if (!FastBladePvE.IsEnabled)
@@ -673,7 +685,9 @@ public sealed class FredderslyPLD : PaladinRotation
 			return nextGCD.IsTheSameTo(true, RoyalAuthorityPvE, ProminencePvE);
 		}
 
-		return ImperatorPvE.Cooldown.WillHaveOneChargeGCD(1)
+		// IsCoolingDown guard: a never-used Imperator "will have a charge" too, which would
+		// fire Fight or Flight before Royal Authority banks procs in the standard opener.
+		return (ImperatorPvE.Cooldown.IsCoolingDown && ImperatorPvE.Cooldown.WillHaveOneChargeGCD(1))
 			|| HasJohannBurstGCD
 			|| StatusHelper.PlayerHasStatus(true, StatusID.AtonementReady, StatusID.SepulchreReady, StatusID.SupplicationReady, StatusID.DivineMight)
 			|| IsLastAction(true, RoyalAuthorityPvE)
