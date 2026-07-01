@@ -1,4 +1,4 @@
-// FredderslyPLD Test Version: 2026-07-01.2-StandardOpener
+// FredderslyPLD Test Version: 2026-07-01.3-ScrapLobPull
 
 namespace RotationSolver.ExtraRotations.Tank;
 
@@ -12,9 +12,7 @@ public sealed class FredderslyPLD : PaladinRotation
 	private static bool InConfiteorCombo => BladeOfFaithReady || BladeOfTruthReady || BladeOfValorReady;
 	private static bool HasJohannBurstGCD => HasConfiteorReady || InConfiteorCombo;
 
-	private bool CanUseJohannPullFightOrFlight => UseJohannShieldLobPull
-		&& CombatElapsedLessGCD(2);
-	private bool CanUseFightOrFlight => HasHostilesInRange || !MeleeFoF || CanUseJohannPullFightOrFlight;
+	private bool CanUseFightOrFlight => HasHostilesInRange || !MeleeFoF;
 	private bool IsStartingFightOrFlight => HasFightOrFlight || IsLastAbility(true, FightOrFlightPvE);
 
 	private bool FightOrFlightSoon => !HasFightOrFlight
@@ -60,9 +58,6 @@ public sealed class FredderslyPLD : PaladinRotation
 	#endregion
 
 	#region Config Options
-
-	[RotationConfig(CombatType.PvE, Name = "Use Shield Lob to pull like Johann")]
-	private bool UseJohannShieldLobPull { get; set; } = true;
 
 	[RotationConfig(CombatType.PvE, Name = "Only use Fight or Flight while in melee range of an enemy")]
 	public bool MeleeFoF { get; set; } = true;
@@ -145,24 +140,7 @@ public sealed class FredderslyPLD : PaladinRotation
 			return act;
 		}
 
-		if (UseJohannShieldLobPull && remainTime <= 3f && remainTime > 1f && UseBurstMedicine(out act))
-		{
-			return act;
-		}
-
-		if (UseJohannShieldLobPull && remainTime <= 1.5f && ShieldLobPvE.CanUse(out act))
-		{
-			return act;
-		}
-
-		// Shield Lob is a MeleeRangedAttack special type and refuses targets closer than
-		// 3y + MeleeRangedOffset, so fall back to Fast Blade when already in melee range.
-		if (UseJohannShieldLobPull && remainTime <= 0.58f && FastBladePvE.CanUse(out act))
-		{
-			return act;
-		}
-
-		if (!UseJohannShieldLobPull && remainTime < HolySpiritPvE.Info.CastTime + CountDownAhead
+		if (remainTime < HolySpiritPvE.Info.CastTime + CountDownAhead
 			&& HolySpiritPvE.CanUse(out act))
 		{
 			return act;
@@ -551,7 +529,7 @@ public sealed class FredderslyPLD : PaladinRotation
 		}
 
 		// Standard opener pots in Riot Blade's weave slot, two GCDs before Fight or Flight.
-		if (!UseJohannShieldLobPull && CombatElapsedLessGCD(3) && IsLastGCD(true, RiotBladePvE)
+		if (CombatElapsedLessGCD(3) && IsLastGCD(true, RiotBladePvE)
 			&& UseBurstMedicine(out act))
 		{
 			return true;
@@ -653,11 +631,11 @@ public sealed class FredderslyPLD : PaladinRotation
 			return false;
 		}
 
-		// Standard opener (no Shield Lob pull) holds Fight or Flight through the first
-		// combo GCDs; the final gate then fires it in Royal Authority's weave slot.
+		// Standard opener holds Fight or Flight through the first combo GCDs;
+		// the final gate then fires it in Royal Authority's weave slot.
 		if (CombatElapsedLessGCD(2))
 		{
-			return UseJohannShieldLobPull && CanUseJohannPullFightOrFlight;
+			return false;
 		}
 
 		if (!FastBladePvE.IsEnabled)
