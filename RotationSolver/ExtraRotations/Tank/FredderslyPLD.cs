@@ -1,4 +1,4 @@
-// FredderslyPLD Test Version: 2026-06-29.3-OathDeadlock
+// FredderslyPLD Test Version: 2026-07-01.3-ScrapLobPull
 
 namespace RotationSolver.ExtraRotations.Tank;
 
@@ -12,14 +12,7 @@ public sealed class FredderslyPLD : PaladinRotation
 	private static bool InConfiteorCombo => BladeOfFaithReady || BladeOfTruthReady || BladeOfValorReady;
 	private static bool HasJohannBurstGCD => HasConfiteorReady || InConfiteorCombo;
 
-	private bool JustUsedOath => IsLastAbility(true, HolySheltronPvE)
-		|| IsLastAbility(true, SheltronPvE)
-		|| IsLastAbility(true, InterventionPvE)
-		|| IsLastAbility(true, CoverPvE);
-
-	private bool CanUseJohannPullFightOrFlight => UseJohannShieldLobPull
-		&& CombatElapsedLessGCD(2);
-	private bool CanUseFightOrFlight => HasHostilesInRange || !MeleeFoF || CanUseJohannPullFightOrFlight;
+	private bool CanUseFightOrFlight => HasHostilesInRange || !MeleeFoF;
 	private bool IsStartingFightOrFlight => HasFightOrFlight || IsLastAbility(true, FightOrFlightPvE);
 
 	private bool FightOrFlightSoon => !HasFightOrFlight
@@ -65,9 +58,6 @@ public sealed class FredderslyPLD : PaladinRotation
 	#endregion
 
 	#region Config Options
-
-	[RotationConfig(CombatType.PvE, Name = "Use Shield Lob to pull like Johann")]
-	private bool UseJohannShieldLobPull { get; set; } = true;
 
 	[RotationConfig(CombatType.PvE, Name = "Only use Fight or Flight while in melee range of an enemy")]
 	public bool MeleeFoF { get; set; } = true;
@@ -150,17 +140,7 @@ public sealed class FredderslyPLD : PaladinRotation
 			return act;
 		}
 
-		if (UseJohannShieldLobPull && remainTime <= 3f && remainTime > 1f && UseBurstMedicine(out act))
-		{
-			return act;
-		}
-
-		if (UseJohannShieldLobPull && remainTime <= 1.5f && ShieldLobPvE.CanUse(out act))
-		{
-			return act;
-		}
-
-		if (!UseJohannShieldLobPull && remainTime < HolySpiritPvE.Info.CastTime + CountDownAhead
+		if (remainTime < HolySpiritPvE.Info.CastTime + CountDownAhead
 			&& HolySpiritPvE.CanUse(out act))
 		{
 			return act;
@@ -543,9 +523,19 @@ public sealed class FredderslyPLD : PaladinRotation
 	private bool TryUseJohannPotion(out IAction? act)
 	{
 		act = null;
-		return InCombat
-			&& HasFightOrFlight
-			&& UseBurstMedicine(out act);
+		if (!InCombat)
+		{
+			return false;
+		}
+
+		// Standard opener pots in Riot Blade's weave slot, two GCDs before Fight or Flight.
+		if (CombatElapsedLessGCD(3) && IsLastGCD(true, RiotBladePvE)
+			&& UseBurstMedicine(out act))
+		{
+			return true;
+		}
+
+		return HasFightOrFlight && UseBurstMedicine(out act);
 	}
 
 	private bool TryUseFightOrFlight(IAction nextGCD, out IAction? act)
@@ -641,9 +631,11 @@ public sealed class FredderslyPLD : PaladinRotation
 			return false;
 		}
 
+		// Standard opener holds Fight or Flight through the first combo GCDs;
+		// the final gate then fires it in Royal Authority's weave slot.
 		if (CombatElapsedLessGCD(2))
 		{
-			return UseJohannShieldLobPull ? CanUseJohannPullFightOrFlight : HasHostilesInRange;
+			return false;
 		}
 
 		if (!FastBladePvE.IsEnabled)
@@ -671,7 +663,9 @@ public sealed class FredderslyPLD : PaladinRotation
 			return nextGCD.IsTheSameTo(true, RoyalAuthorityPvE, ProminencePvE);
 		}
 
-		return ImperatorPvE.Cooldown.WillHaveOneChargeGCD(1)
+		// IsCoolingDown guard: a never-used Imperator "will have a charge" too, which would
+		// fire Fight or Flight before Royal Authority banks procs in the standard opener.
+		return (ImperatorPvE.Cooldown.IsCoolingDown && ImperatorPvE.Cooldown.WillHaveOneChargeGCD(1))
 			|| HasJohannBurstGCD
 			|| StatusHelper.PlayerHasStatus(true, StatusID.AtonementReady, StatusID.SepulchreReady, StatusID.SupplicationReady, StatusID.DivineMight)
 			|| IsLastAction(true, RoyalAuthorityPvE)
