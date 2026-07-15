@@ -32,8 +32,6 @@ internal class P1_Graven3_FinalSpread : SplatoonScript
     private const uint CastIdTrueThunder = 47775;
     private const uint CastIdFalseThunder = 47777;
 
-    private const string VfxKefkaTrue = "vfx/lockon/eff/m0462trg_c02c.avfx";
-    private const string VfxKefkaFalse = "vfx/lockon/eff/m0462trg_c01c.avfx";
     private const string VfxPlayerSpread = "vfx/lockon/eff/m0462trg_a0c.avfx";
     private const string VfxPlayerStack = "vfx/lockon/eff/m0462trg_b0c.avfx";
 
@@ -119,7 +117,7 @@ internal class P1_Graven3_FinalSpread : SplatoonScript
 
     #region State
 
-    private KefkaVFX _kefkaVfx = KefkaVFX.None;
+    private ThunderType _thunderType = ThunderType.None;
     private PlayerVfxState _playerVfx = PlayerVfxState.None;
     private DiagonalPattern _pattern = DiagonalPattern.None;
     private FinalSolution _final = FinalSolution.Unsolved;
@@ -154,7 +152,7 @@ internal class P1_Graven3_FinalSpread : SplatoonScript
         Stack,
     }
 
-    private enum KefkaVFX
+    private enum ThunderType
     {
         None,
         True,
@@ -177,7 +175,6 @@ internal class P1_Graven3_FinalSpread : SplatoonScript
     private sealed class Config : IEzConfig
     {
         public PartyRole Role = PartyRole.T1;
-        public bool IgnoreKefkaVfx;
         public bool ShowPreview;
         public DiagonalPattern PreviewPattern = DiagonalPattern.NwToSe;
         public bool PreviewMyRoleOnly;
@@ -235,13 +232,13 @@ internal class P1_Graven3_FinalSpread : SplatoonScript
             return;
         }
 
-        if(_kefkaVfx == KefkaVFX.None || _playerVfx == PlayerVfxState.None)
+        if(_thunderType == ThunderType.None || _playerVfx == PlayerVfxState.None)
         {
             _final = FinalSolution.Unsolved;
         }
         else
         {
-            _final = ResolveFinalSolution(_playerVfx, _kefkaVfx);
+            _final = ResolveFinalSolution(_playerVfx, _thunderType);
         }
 
         if(_final == FinalSolution.Unsolved || _pattern == DiagonalPattern.None)
@@ -256,7 +253,7 @@ internal class P1_Graven3_FinalSpread : SplatoonScript
 
     public override void OnStartingCast(uint source, uint castId)
     {
-        if(!IsPhaseActive() || _pattern != DiagonalPattern.None)
+        if(!IsPhaseActive())
         {
             return;
         }
@@ -266,7 +263,12 @@ internal class P1_Graven3_FinalSpread : SplatoonScript
             return;
         }
 
-        if(TryDetectPattern(out var pattern))
+        if(_thunderType == ThunderType.None)
+        {
+            _thunderType = castId == CastIdTrueThunder ? ThunderType.True : ThunderType.False;
+        }
+
+        if(_pattern == DiagonalPattern.None && TryDetectPattern(out var pattern))
         {
             _pattern = pattern;
         }
@@ -283,11 +285,6 @@ internal class P1_Graven3_FinalSpread : SplatoonScript
         {
             _playerVfx = playerVfx;
         }
-
-        if(_kefkaVfx == KefkaVFX.None && TryMapKefkaVfxPath(vfxPath, out var kefkaVfx))
-        {
-            _kefkaVfx = kefkaVfx;
-        }
     }
 
     public override void OnSettingsDraw()
@@ -296,7 +293,6 @@ internal class P1_Graven3_FinalSpread : SplatoonScript
         ImGui.Separator();
         ImGui.SetNextItemWidth(200f);
         ImGuiEx.EnumCombo("Role", ref C.Role);
-        ImGui.Checkbox("Ignore KefkaVFX (always true)", ref C.IgnoreKefkaVfx);
 
         ImGui.Spacing();
         ImGui.TextDisabled("Preview");
@@ -326,7 +322,7 @@ internal class P1_Graven3_FinalSpread : SplatoonScript
             ImGui.TextUnformatted(_pattern == DiagonalPattern.None ? "Pattern: (none)" : $"Pattern: {_pattern}");
         }
 
-        ImGui.TextUnformatted(_kefkaVfx == KefkaVFX.None ? "KefkaVFX: (none)" : $"KefkaVFX: {_kefkaVfx}");
+        ImGui.TextUnformatted(_thunderType == ThunderType.None ? "Thunder: (none)" : $"Thunder: {_thunderType}");
         ImGui.TextUnformatted(_playerVfx == PlayerVfxState.None ? "Player VFX: (none)" : $"Player VFX: {_playerVfx}");
         ImGui.TextUnformatted(_final == FinalSolution.Unsolved ? "FinalSolution: (unsolved)" : $"FinalSolution: {_final}");
     }
@@ -337,7 +333,7 @@ internal class P1_Graven3_FinalSpread : SplatoonScript
 
     private void ResetState()
     {
-        _kefkaVfx = KefkaVFX.None;
+        _thunderType = ThunderType.None;
         _playerVfx = PlayerVfxState.None;
         _pattern = DiagonalPattern.None;
         _final = FinalSolution.Unsolved;
@@ -455,17 +451,6 @@ internal class P1_Graven3_FinalSpread : SplatoonScript
         return playerVfx != PlayerVfxState.None;
     }
 
-    private static bool TryMapKefkaVfxPath(string vfxPath, out KefkaVFX kefkaVfx)
-    {
-        kefkaVfx = vfxPath switch
-        {
-            VfxKefkaTrue => KefkaVFX.True,
-            VfxKefkaFalse => KefkaVFX.False,
-            _ => KefkaVFX.None,
-        };
-        return kefkaVfx != KefkaVFX.None;
-    }
-
     private static IEnumerable<IBattleNpc> FindKefkaThunderCasters()
         => Svc.Objects.OfType<IBattleNpc>()
             .Where(npc => npc.DataId == KefkaDataId
@@ -496,19 +481,14 @@ internal class P1_Graven3_FinalSpread : SplatoonScript
         return false;
     }
 
-    private FinalSolution ResolveFinalSolution(PlayerVfxState playerVfx, KefkaVFX kefkaVfx)
+    private static FinalSolution ResolveFinalSolution(PlayerVfxState playerVfx, ThunderType thunderType)
     {
-        if(C.IgnoreKefkaVfx)
-        {
-            kefkaVfx = KefkaVFX.True;
-        }
-
         if(playerVfx == PlayerVfxState.Spread)
         {
-            return kefkaVfx == KefkaVFX.True ? FinalSolution.Spread : FinalSolution.Stack;
+            return thunderType == ThunderType.True ? FinalSolution.Spread : FinalSolution.Stack;
         }
 
-        return kefkaVfx == KefkaVFX.True ? FinalSolution.Stack : FinalSolution.Spread;
+        return thunderType == ThunderType.True ? FinalSolution.Stack : FinalSolution.Spread;
     }
 
     private static bool AnyCasterAtAnyX(IEnumerable<IBattleNpc> casters, float[] xs)
