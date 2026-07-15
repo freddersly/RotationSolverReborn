@@ -9,6 +9,7 @@ using Dalamud.Game.ClientState.Objects.Types;
 using ECommons;
 using ECommons.Configuration;
 using ECommons.DalamudServices;
+using ECommons.Hooks;
 using ECommons.ImGuiMethods;
 using Splatoon.SplatoonScripting;
 
@@ -249,7 +250,17 @@ internal class P1_Graven3_FinalSpread : SplatoonScript
         ApplyMechanicDisplay(_final, _pattern);
     }
 
+    public override void OnCombatStart() => ResetState();
+
     public override void OnReset() => ResetState();
+
+    public override void OnDirectorUpdate(DirectorUpdateCategory category)
+    {
+        if(category.EqualsAny(DirectorUpdateCategory.Commence,
+            DirectorUpdateCategory.Recommence,
+            DirectorUpdateCategory.Wipe))
+            ResetState();
+    }
 
     public override void OnStartingCast(uint source, uint castId)
     {
@@ -338,7 +349,6 @@ internal class P1_Graven3_FinalSpread : SplatoonScript
         _pattern = DiagonalPattern.None;
         _final = FinalSolution.Unsolved;
         DisableAllElements();
-        Controller.Hide();
     }
 
     private void DisableAllElements()
